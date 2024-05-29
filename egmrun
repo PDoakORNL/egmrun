@@ -3,6 +3,9 @@
 _source_path="$( cd "$( dirname "$(readlink -qf "$0")" )" && pwd )"
 _emacs_gdb_spawn_client="${_source_path}/emacs_gdb_spawn_client"
 
+echo "$_source_path"
+echo "$_emacs_gdb_spawn_client"
+
 log() { printf '%s\n' "$*"; }
 error() { log "ERROR: $*" >&2; }
 fatal() { error "$@"; exit 1; }
@@ -97,6 +100,7 @@ done
 shift $(( $OPTIND - 1 ))
 
 _exe=$1
+echo "exe to debug: ${_exe}"
 if [ -z "${_exe}" ]; then
   fatal "missing executable"
 fi
@@ -115,8 +119,11 @@ if [ "x$(__emacs_server_list  | grep ${_server})" == "x" ]; then
   emacs --daemon="${_server}" --name="${_server}@$(hostname --fqdn)" > /dev/null
 fi
 
+echo user: $USER
 # Getting the pid of the parent emacs
-_ppid=$(ps -fu $USER | grep -v grep |grep "emacs --daemon=${_server} " | awk '{ print $2; }')
+echo "_server ${_server}"
+echo "ps -fu ${USER} | grep -v grep |grep "emacs --daemon=${_server} " | awk '{ print $2; }'"
+_ppid=$(ps -fu ${USER} | grep -v grep | awk -v server_name=${_server} 'BEGIN{ regex = "emacs --daemon=" server_name } $0 ~ regex { print $2; }')
 
 #_tmp=$(tempfile --prefix "${name}" --suffix "[${_rank}]")
 if [ "x$TMPDIR" == "x" ]; then
@@ -130,6 +137,8 @@ if [ ! -d ${_tmpdir} ]; then
   mkdir -p $_tmpdir
 fi
 
+echo ppid: ${_ppid}
+
 log "(${_ppid}) spawning mpi jobs"
 ${_mpirun} -oversubscribe ${_mpirun_np} ${_nb_proc} \
 	   ${_emacs_gdb_spawn_client} \
@@ -142,7 +151,7 @@ ${_mpirun} -oversubscribe ${_mpirun_np} ${_nb_proc} \
 
 function clean() {
   #_buffer_regex="${_name}_--[0-9]+--"
-  _pid=$(ps --ppid ${_ppid} -f --cols 2000 | grep -e "gdb --fullname -ix.*${_tmpdir}/${_name}_--[0-9]\+-- " | awk '{ print $2; }')
+  _pid=$(ps --ppid ${_ppid} -f --cols 2000 | grep -e "rocgdb --fullname -ix.*${_tmpdir}/${_name}_--[0-9]\+-- " | awk '{ print $2; }')
   log "Killing remaining GDBs"
   for _p in ${_pid}; do
     echo kill -9 ${_p}

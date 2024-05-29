@@ -15,6 +15,8 @@ function __get_rank() {
   echo $_rank
 }
 
+EMACS_CLIENT='emacsclient'
+
 function __wait() {
   while [ -e /proc/$1 ]
   do
@@ -67,8 +69,11 @@ shift $(( $OPTIND - 1 ))
 
 _exe=$1
 shift
+echo "shift exe: ${_exe}"
+echo $1 $2 $3 $4
 
 _fullname=$(readlink -f ${_exe})
+echo "fullname = ${_fullname}"
 if [ "x${_wd}" == "x" ]; then
   _wd=$(dirname ${_fullname})
 fi
@@ -93,10 +98,10 @@ if [ ${_rank} -eq ${_rank_of_interest} ] ; then
   if [ "x${_gdbinit}" = "x" ]; then
     _gdbinit="-ex start"
   fi
-  emacsclient ${frame} -s ${_server} -e "(gud-gdb \"gdb --fullname -ix ${_tmp} ${_gdbinit} -cd ${_wd} -args ${_fullname} $*\")" 2>&1 > ${_log}
+  emacsclient ${frame} -s ${_server} -e "(gud-gdb \"rocgdb --fullname -ix ${_tmp} ${_gdbinit} --cd ${_wd} --args ${_fullname} $*\")" 2>&1 > ${_log}
 else
   # slaves
-  emacsclient -s ${_server} -e "(gud-gdb \"gdb --fullname -ix ${_tmp} ${_gdbinit} ${_autorun} -cd ${_wd} -args ${_fullname} $*\")" 2>&1 > ${_log}
+  emacsclient -s ${_server} -e "(gud-gdb \"rocgdb --fullname -ix ${_tmp} ${_gdbinit} ${_autorun} --cd ${_wd} --args ${_fullname} $*\")" 2>&1 > ${_log}
 fi
 
 sleep 1
@@ -105,12 +110,12 @@ sleep 1
 # Finding the GDB pid
 if [ ! \( ${_rank} -eq ${_rank_of_interest} -a "x${frame}" != "x" \) ]; then
   sleep 1
-  _pid=$(ps --ppid ${_ppid} -f --cols 2000 | grep -e "gdb --fullname -ix .*${_tmp} " | awk '{ print $2; }')
+  _pid=$(ps --ppid ${_ppid} -f --cols 2000 | grep -e "rocgdb --fullname -ix .*${_tmp} " | awk '{ print $2; }')
 
   # some cleaning up
   trap "echo ${_rank} kill ${_pid}: TRAP; kill -9 ${_pid}; exit 1" ABRT TERM KILL INT QUIT ERR
 
   # wait for gdb to finish
-  echo "$_rank: Waiting for gdb (${_pid}:${_ppid}) [gdb --fullname -ix ${_tmp}]"
+  echo "$_rank: Waiting for rocgdb (${_pid}:${_ppid}) [rocgdb --fullname -ix ${_tmp}]"
   __wait $_pid
 fi
