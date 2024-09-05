@@ -16,7 +16,7 @@ function __get_rank() {
 }
 
 function __wait() {
-  while [ -e /proc/$1 ]
+  while [ -z $(kill -0 $_pid) ]
   do
     sleep .6
   done
@@ -37,7 +37,7 @@ _gdbinit=
 while getopts "p:t:w:n:s:x:fa" opt; do
   case $opt in
     a)
-      _autorun="-ex run"
+      _autorun="-o \'run\'"
       ;;
     f)
       _frame="-c"
@@ -69,48 +69,55 @@ _exe=$1
 shift
 
 _fullname=$(readlink -f ${_exe})
+echo "_fullname = ${_fullname}"
 if [ "x${_wd}" == "x" ]; then
   _wd=$(dirname ${_fullname})
 fi
 _name=$(basename ${_fullname})
 
 # Setting the environment file for gdb to know about MPI
-_tmp="${_tmpdir}/${_name}_--$_rank--"
-printenv -0 | grep -vz TERM | grep -vz BASH_FUNC | xargs -0 -I '{}' -- echo "set environment {}" > "${_tmp}"
+_tmp="${_tmpdir}${_name}_--$_rank--"
+printenv | awk '!/TERM|BASH_FUN/ {split($0,envp,"="); print "env " envp[1] "=\"" envp[2] "\""}' > "${_tmp}"
+# lldb needs to do this to change working directory
+_change_working_dir="platform settings -w ${_wd}"
+echo $_change_working_dir >> ${_tmp}
+
+# now the canned commands for the debugging
+
+
 _log="${_tmpdir}/log_${_rank}"
 
 _gdbinit_new=${_gdbinit/<rank>/${_rank}}
-echo "${_rank}: ${_gdbinit_new} (${_gdbinit})"
+
 if [ ! -e ${_gdbinit_new} ]; then
-   _gdbinit="-x ${_gdbinit/<rank>/}"
+   _gdbinit="-s ${_gdbinit/<rank>/}"
 elif [ "x${_gdbinit_new}" != "x" ]; then
-  _gdbinit="-x ${_gdbinit_new}"
+  _gdbinit="-s ${_gdbinit_new}"
 fi
 
 # Spawning the clients
 if [ ${_rank} -eq ${_rank_of_interest} ] ; then
   # master
-  if [ "x${_gdbinit}" = "x" ]; then
-    _gdbinit="-ex start"
-  fi
-  emacsclient ${frame} -s ${_server} -e "(gud-gdb \"gdb --fullname -ix ${_tmp} ${_gdbinit} -cd ${_wd} -args ${_fullname} $*\")" 2>&1 > ${_log}
+  # if [ "x${_gdbinit}" = "x" ]; then
+  #   _gdbinit="-o \'start\'"
+  # fi
+  emacsclient ${frame} -s ${_server} -e "(realgud--lldb \"lldb -S ${_tmp} ${_gdbinit} ${_fullname} -- $*\")" 2>&1 > ${_log}
 else
   # slaves
-  emacsclient -s ${_server} -e "(gud-gdb \"gdb --fullname -ix ${_tmp} ${_gdbinit} ${_autorun} -cd ${_wd} -args ${_fullname} $*\")" 2>&1 > ${_log}
+  emacsclient -s ${_server} -e "(realgud--lldb \"lldb -S ${_tmp} ${_gdbinit} ${_autorun} ${_fullname} -- $*\")" 2>&1 > ${_log}
 fi
 
 sleep 1
 
-
 # Finding the GDB pid
 if [ ! \( ${_rank} -eq ${_rank_of_interest} -a "x${frame}" != "x" \) ]; then
-  sleep 1
-  _pid=$(ps --ppid ${_ppid} -f --cols 2000 | grep -e "gdb --fullname -ix .*${_tmp} " | awk '{ print $2; }')
+  sleep 3
+  _pid=$(COLUMNS=2000 ps -u ${USER} -f | grep $_ppid | awk -v tmp_dir=${_tmp} 'BEGIN{ regex = "lldb.*" tmp_dir } $0 ~ regex { print $2; }')
 
   # some cleaning up
   trap "echo ${_rank} kill ${_pid}: TRAP; kill -9 ${_pid}; exit 1" ABRT TERM KILL INT QUIT ERR
 
   # wait for gdb to finish
-  echo "$_rank: Waiting for gdb (${_pid}:${_ppid}) [gdb --fullname -ix ${_tmp}]"
+  echo "$_rank: Waiting for lldb (${_pid}:${_ppid}) [lldb -S ${_tmp}]"
   __wait $_pid
 fi
